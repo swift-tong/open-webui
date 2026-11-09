@@ -1,0 +1,44 @@
+# ══════════════════════════════════════════════════════════════
+# Open WebUI 独立部署（与 hermes-agent 的 compose 解耦）
+#
+# 用法（在部署机执行，工作目录 = deploy/）：
+#   cp .env.example .env && vi .env
+#   ./deploy.sh
+# 或手动：
+#   docker compose --env-file .env up -d
+# ══════════════════════════════════════════════════════════════
+services:
+  open-webui:
+    image: ${OPEN_WEBUI_IMAGE}
+    container_name: open-webui
+    restart: unless-stopped
+    environment:
+      # 对接 Hermes 的 OpenAI 兼容端点（完整 agent 会话）
+      OPENAI_API_BASE_URL: ${HERMES_API_BASE_URL}
+      OPENAI_API_KEY: ${HERMES_API_KEY}
+      # 对外访问地址（用于生成分享链接等）
+      WEBUI_URL: https://${DOMAIN}
+      # 把登录用户身份（X-OpenWebUI-User-Email 等请求头）转发给上游；
+      # Hermes 侧据此把邮箱写进 sessions.user_id，供 permission_guard 做权限判定
+      ENABLE_FORWARD_USER_INFO_HEADERS: "true"
+      # 服务器连不上 HuggingFace：离线模式，跳过 embedding 模型下载（否则启动卡死）
+      OFFLINE_MODE: "true"
+      HF_HUB_OFFLINE: "1"
+      # 账号策略：注册后待管理员审核
+      ENABLE_SIGNUP: ${ENABLE_SIGNUP:-true}
+      DEFAULT_USER_ROLE: pending
+    extra_hosts:
+      # 容器内用 host.docker.internal 访问宿主回环（hermes 的 8700 只绑 127.0.0.1）
+      - "host.docker.internal:host-gateway"
+    ports:
+      # 只绑回环地址，公网入口交给宿主机 nginx
+      - "127.0.0.1:${OPEN_WEBUI_PORT:-8690}:8080"
+    volumes:
+      # 用户/聊天记录/配置持久化
+      - ${OPEN_WEBUI_DATA_DIR:-/var/deploy/open-webui/data}:/app/backend/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
